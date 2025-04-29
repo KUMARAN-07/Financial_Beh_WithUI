@@ -40,8 +40,8 @@ class AnomalyDetector:
             # Category encoding (optional)
             category_risk = 0
             if 'category' in tx:
-                high_risk_categories = ['GAMBLING', 'CRYPTO', 'LUXURY', 'TRANSFER']
-                medium_risk_categories = ['TRAVEL', 'ENTERTAINMENT']
+                high_risk_categories = ['ENTERTAINMENT', 'TRAVEL', 'RESTAURANT']
+                medium_risk_categories = ['RETAIL', 'GROCERY']
                 if tx['category'] in high_risk_categories:
                     category_risk = 2
                 elif tx['category'] in medium_risk_categories:
@@ -104,7 +104,7 @@ class AnomalyDetector:
                 
                 # Force anomaly detection for very high amounts as a fallback
                 if 'amount' in tx and float(tx['amount']) > 5000:
-                    high_risk_categories = ['GAMBLING', 'CRYPTO', 'LUXURY', 'TRANSFER']
+                    high_risk_categories = ['ENTERTAINMENT', 'TRAVEL', 'RESTAURANT']
                     if 'category' in tx and tx['category'] in high_risk_categories:
                         logger.info(f"Forcing anomaly detection for high-risk transaction {tx.get('id', 'unknown')}")
                         result['is_anomaly'] = True

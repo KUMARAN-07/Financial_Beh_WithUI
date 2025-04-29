@@ -10,6 +10,8 @@ from pathlib import Path
 from dateutil.parser import isoparse
 import asyncio
 import json
+import random
+import uuid
 
 from ..models.base import Transaction, Customer, Account, Merchant
 from ..models.anomaly.isolation_forest import AnomalyDetector
@@ -260,6 +262,11 @@ async def get_merchant_risk(merchant_id: str):
         # Calculate risk score
         risk_score = graph_db.get_merchant_risk_score(merchant_id)
         
+        # Default to 0.5 if the risk score is None
+        if risk_score is None:
+            risk_score = 0.5
+            logger.warning(f"No risk score found for merchant {merchant_id}, using default value of 0.5")
+        
         return {
             "merchant_id": merchant_id,
             "risk_score": risk_score,
@@ -340,79 +347,314 @@ async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time transaction updates."""
     await websocket.accept()
     try:
+        # Initial connection - don't send any data yet
+        await websocket.send_text(json.dumps({
+            "type": "connection_established",
+            "message": "WebSocket connection established. Waiting for commands.",
+            "timestamp": datetime.now().isoformat()
+        }))
+        
+        # Listen for commands from client
         while True:
+            # Wait for client commands
+            data = await websocket.receive_text()
             try:
-                # Check if Neo4j is connected
-                if hasattr(graph_db, 'is_connected') and graph_db.is_connected():
-                    # Fetch the latest 10 transactions from your graph database
-                    query = """
-                    MATCH (t:Transaction)
-                    RETURN t
-                    ORDER BY t.timestamp DESC
-                    LIMIT 10
-                    """
-                    result = graph_db.graph.run(query)
-                    transactions = [dict(record["t"]) for record in result]
+                command = json.loads(data)
+                
+                # Handle different command types
+                if command.get("type") == "get_transactions":
+                    # Fetch transactions from database when requested
+                    if hasattr(graph_db, 'is_connected') and graph_db.is_connected():
+                        # Get requested number of transactions or default to 10
+                        limit = command.get("limit", 10)
+                        
+                        query = f"""
+                        MATCH (t:Transaction)
+                        RETURN t
+                        ORDER BY t.timestamp DESC
+                        LIMIT {limit}
+                        """
+                        result = graph_db.graph.run(query)
+                        transactions = [dict(record["t"]) for record in result]
 
-                    # Convert timestamps to string for JSON serialization
-                    for tx in transactions:
-                        if hasattr(tx['timestamp'], 'isoformat'):
-                            tx['timestamp'] = tx['timestamp'].isoformat()
-                        elif hasattr(tx['timestamp'], 'to_native'):
-                            tx['timestamp'] = tx['timestamp'].to_native().isoformat()
-                    
-                    # Send real transactions
+                        # Convert timestamps to string for JSON serialization
+                        for tx in transactions:
+                            if hasattr(tx['timestamp'], 'isoformat'):
+                                tx['timestamp'] = tx['timestamp'].isoformat()
+                            elif hasattr(tx['timestamp'], 'to_native'):
+                                tx['timestamp'] = tx['timestamp'].to_native().isoformat()
+                        
+                        # Send real transactions
+                        await websocket.send_text(json.dumps({
+                            "type": "transactions",
+                            "data": transactions,
+                            "timestamp": datetime.now().isoformat(),
+                            "source": "database"
+                        }))
+                    else:
+                        # Database not connected
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "message": "Database not connected",
+                            "timestamp": datetime.now().isoformat()
+                        }))
+                elif command.get("type") == "ping":
+                    # Simple ping-pong to keep connection alive
                     await websocket.send_text(json.dumps({
-                        "type": "transactions",
-                        "data": transactions,
-                        "timestamp": datetime.now().isoformat(),
-                        "source": "database"
+                        "type": "pong",
+                        "timestamp": datetime.now().isoformat()
                     }))
                 else:
-                    # Database not connected, send demo data
-                    import random
-                    from uuid import uuid4
-                    
-                    # Generate demo transactions
-                    demo_transactions = []
-                    current_time = datetime.now()
-                    
-                    for i in range(5):
-                        # Create a demo transaction
-                        demo_tx = {
-                            "id": str(uuid4()),
-                            "customer_id": f"customer_{random.randint(1, 10)}",
-                            "account_id": f"account_{random.randint(1, 20)}",
-                            "merchant_id": f"merchant_{random.randint(1, 5)}",
-                            "amount": round(random.uniform(10, 1000), 2),
-                            "timestamp": (current_time.replace(second=current_time.second-i*30)).isoformat(),
-                            "category": random.choice(["RETAIL", "FOOD", "TRAVEL", "ENTERTAINMENT"]),
-                            "is_anomaly": random.random() < 0.2
-                        }
-                        demo_transactions.append(demo_tx)
-                    
-                    # Send demo transactions
+                    # Unknown command
                     await websocket.send_text(json.dumps({
-                        "type": "transactions",
-                        "data": demo_transactions,
-                        "timestamp": datetime.now().isoformat(),
-                        "source": "demo",
-                        "message": "Using demo data because database is not connected"
+                        "type": "error",
+                        "message": f"Unknown command: {command.get('type')}",
+                        "timestamp": datetime.now().isoformat()
                     }))
+                    
+            except json.JSONDecodeError:
+                # Handle invalid JSON
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "message": "Invalid JSON received",
+                    "timestamp": datetime.now().isoformat()
+                }))
             except Exception as e:
-                # Send error but don't disconnect
-                logger.error(f"Error in WebSocket: {str(e)}")
+                # Handle other errors
+                logger.error(f"Error processing WebSocket command: {str(e)}")
                 await websocket.send_text(json.dumps({
                     "type": "error",
                     "message": str(e),
                     "timestamp": datetime.now().isoformat()
                 }))
-
-            await asyncio.sleep(2)  # Send updates every 2 seconds
+                
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
     except Exception as e:
         logger.error(f"WebSocket error: {str(e)}")
+
+@app.get("/transactions")
+async def get_transactions(
+    page: int = 0,
+    limit: int = 10,
+    sortBy: str = "timestamp",
+    sortOrder: str = "desc",
+    category: str = None,
+    customer_id: str = None,
+    merchant_id: str = None,
+    is_anomaly: bool = None,
+    start_date: str = None,
+    end_date: str = None
+):
+    """Get transactions with pagination, sorting, and filtering."""
+    try:
+        # Base query
+        base_query = "MATCH (t:Transaction)"
+        
+        # Add filters if provided
+        filters = []
+        if category:
+            filters.append(f"t.category = '{category}'")
+        if customer_id:
+            filters.append(f"t.customer_id = '{customer_id}'")
+        if merchant_id:
+            filters.append(f"t.merchant_id = '{merchant_id}'")
+        if is_anomaly is not None:
+            filters.append(f"t.is_anomaly = {str(is_anomaly).lower()}")
+        if start_date:
+            filters.append(f"t.timestamp >= datetime('{start_date}')")
+        if end_date:
+            filters.append(f"t.timestamp <= datetime('{end_date}')")
+        
+        # Combine filters
+        where_clause = ""
+        if filters:
+            where_clause = "WHERE " + " AND ".join(filters)
+        
+        # Construct Cypher query
+        sort_direction = "DESC" if sortOrder.lower() == "desc" else "ASC"
+        
+        # Ensure sortBy is a valid property
+        valid_properties = ["timestamp", "amount", "id", "category", "is_anomaly", "customer_id", "merchant_id"]
+        if sortBy not in valid_properties:
+            sortBy = "timestamp"  # Default sort
+        
+        # Cap the limit to prevent overloading
+        if limit > 10000:
+            limit = 10000
+            logger.warning(f"Transaction fetch limit capped at 10000")
+        
+        # Final query
+        query = f"""
+        {base_query}
+        {where_clause}
+        RETURN t
+        ORDER BY t.{sortBy} {sort_direction}
+        SKIP {page * limit}
+        LIMIT {limit}
+        """
+        
+        # Count total transactions with the same filters
+        count_query = f"""
+        {base_query}
+        {where_clause}
+        RETURN count(t) as total
+        """
+        
+        # Log the queries being executed
+        logger.info(f"Executing transaction query: {query}")
+        logger.info(f"Executing count query: {count_query}")
+        
+        # Execute queries
+        result = graph_db.graph.run(query)
+        count_result = graph_db.graph.run(count_query)
+        
+        # Process results
+        transactions = []
+        for record in result:
+            tx = dict(record["t"])
+            # Convert Neo4j DateTime to ISO format
+            if hasattr(tx['timestamp'], 'to_native'):
+                tx['timestamp'] = tx['timestamp'].to_native().isoformat()
+            elif isinstance(tx['timestamp'], str):
+                # Already a string, ensure it's in ISO format
+                pass
+            # Ensure boolean values are proper Python booleans
+            if 'is_anomaly' in tx and not isinstance(tx['is_anomaly'], bool):
+                tx['is_anomaly'] = bool(tx['is_anomaly'])
+            transactions.append(tx)
+        
+        # Get total count
+        total = count_result.data()[0]["total"]
+        
+        # Log result
+        logger.info(f"Retrieved {len(transactions)} transactions out of {total} total")
+        
+        return {
+            "transactions": transactions,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": (total + limit - 1) // limit if limit > 0 else 0  # Ceiling division
+        }
+    except Exception as e:
+        logger.error(f"Error fetching transactions: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/transactions/stats")
+async def get_transaction_stats(
+    timeRange: str = "30d",
+    category: str = None
+):
+    """
+    Get transaction statistics for the dashboard.
+    timeRange can be: "1d" (1 day), "7d" (7 days), "30d" (30 days), "1y" (1 year)
+    """
+    try:
+        # Parse time range
+        days = {
+            "1d": 1,
+            "7d": 7,
+            "30d": 30,
+            "1y": 365
+        }.get(timeRange, 30)  # Default to 30 days
+        
+        # Construct date filter
+        date_filter = f"""
+        WHERE datetime() - duration('P{days}D') <= t.timestamp <= datetime()
+        """
+        
+        # Add category filter if provided
+        category_filter = ""
+        if category:
+            category_filter = f"AND t.category = '{category}'"
+        
+        # Query to get transaction counts by day
+        time_query = f"""
+        MATCH (t:Transaction)
+        {date_filter}
+        {category_filter}
+        RETURN date(t.timestamp) as day, count(t) as count,
+               count(CASE WHEN t.is_anomaly = true THEN 1 END) as anomaly_count
+        ORDER BY day
+        """
+        
+        # Query to get category distribution
+        category_query = f"""
+        MATCH (t:Transaction)
+        {date_filter}
+        RETURN t.category as category, count(t) as count
+        ORDER BY count DESC
+        """
+        
+        # Execute queries
+        time_result = graph_db.graph.run(time_query)
+        category_result = graph_db.graph.run(category_query)
+        
+        # Process time series data
+        daily_counts = []
+        for record in time_result:
+            daily_counts.append({
+                "day": record["day"].isoformat() if hasattr(record["day"], "isoformat") else record["day"],
+                "count": record["count"],
+                "anomaly_count": record["anomaly_count"]
+            })
+        
+        # Process category data
+        category_counts = []
+        for record in category_result:
+            category_counts.append({
+                "category": record["category"] or "UNKNOWN",
+                "count": record["count"]
+            })
+        
+        # Get overall stats
+        stats_query = f"""
+        MATCH (t:Transaction)
+        {date_filter}
+        RETURN 
+            count(t) as total_transactions,
+            count(CASE WHEN t.is_anomaly = true THEN 1 END) as anomaly_count,
+            count(DISTINCT t.customer_id) as unique_customers
+        """
+        
+        stats_result = graph_db.graph.run(stats_query)
+        stats_data = stats_result.data()[0]
+        
+        return {
+            "timeRange": timeRange,
+            "dailyCounts": daily_counts,
+            "categoryDistribution": category_counts,
+            "stats": {
+                "totalTransactions": stats_data["total_transactions"],
+                "anomalyCount": stats_data["anomaly_count"],
+                "uniqueCustomers": stats_data["unique_customers"],
+                "anomalyRate": stats_data["anomaly_count"] / stats_data["total_transactions"] if stats_data["total_transactions"] > 0 else 0
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error fetching transaction stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+def generate_transaction(customer_id, merchant_id):
+    """Generate a synthetic transaction."""
+    # Define a more diverse set of transaction categories
+    categories = [
+        "EDUCATION", "HEALTHCARE", "TRAVEL", "GROCERY", "RESTAURANT", "RETAIL", "ENTERTAINMENT",
+        "UTILITIES", "INSURANCE", "AUTOMOTIVE", "ELECTRONICS", "CLOTHING", "BEAUTY", "CHARITY",
+        "FITNESS", "FURNITURE", "BANKING", "REALESTATE", "BOOKS", "JEWELRY", "PETS", "TOYS"
+    ]
+    
+    return {
+        "id": f"tx_{str(uuid.uuid4())[:8]}",
+        "customer_id": customer_id,
+        "merchant_id": merchant_id,
+        "amount": round(random.uniform(10, 1000), 2),
+        "timestamp": datetime.now().isoformat(),
+        "category": random.choice(categories),
+        "is_anomaly": random.random() < 0.1,
+        "risk_score": random.uniform(0, 1)
+    }
 
 if __name__ == "__main__":
     import uvicorn

@@ -8,8 +8,8 @@ def generate_transaction_data(num_transactions=10):
     transactions = []
     
     # Categories with risk levels
-    high_risk_categories = ["GAMBLING", "CRYPTO", "TRANSFER", "LUXURY"]
-    normal_categories = ["RETAIL", "FOOD", "GROCERY", "UTILITY"]
+    high_risk_categories = ["ENTERTAINMENT", "TRAVEL", "RESTAURANT"]
+    normal_categories = ["EDUCATION", "HEALTHCARE", "GROCERY", "RETAIL"]
     
     # Current time for timestamps
     now = datetime.now()
