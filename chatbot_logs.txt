@@ -59,3 +59,13 @@ Response: Based on the provided system data, I can answer your questions:
 
 Please note that these numbers are based on a 30-day period, so if you're looking at a longer time frame, the numbers would be different. If you have any further questions or would like to analyze specific aspects of the data, I'm here to help!
 ----------
+
+--- 2025-04-30T09:44:09.755962 ---
+Query: what is the total transactions
+Response: According to the Transaction Summary data, the total number of transactions for the last 30 days is 5777.
+----------
+
+--- 2025-04-30T09:45:46.755288 ---
+Query: on analyzing should I want to take any actions or everything is fine already 
+Response: I encountered an error while processing your request: 
+----------

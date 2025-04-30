@@ -1,8 +1,8 @@
 import React from 'react';
-import { Card, Box, Typography, useTheme } from '@mui/material';
-import { ArrowUpward, ArrowDownward } from '@mui/icons-material';
+import { Paper, Box, Typography, useTheme, Avatar, LinearProgress, Chip } from '@mui/material';
+import { TrendingUp as TrendingUpIcon, TrendingDown as TrendingDownIcon } from '@mui/icons-material';
 
-const StatCard = ({ title, value, icon, change, changeType, color }) => {
+const StatCard = ({ title, value, icon, change, changeType, color, detail, progress }) => {
   const theme = useTheme();
   
   // Default color if not provided
@@ -20,61 +20,89 @@ const StatCard = ({ title, value, icon, change, changeType, color }) => {
   };
   
   // Determine change icon based on type
-  const ChangeIcon = changeType === 'positive' ? ArrowUpward : ArrowDownward;
+  const ChangeIcon = changeType === 'positive' ? TrendingUpIcon : TrendingDownIcon;
+  
+  // Format numeric values with comma separators if they're large numbers
+  const formattedValue = typeof value === 'number' && value > 999 
+    ? value.toLocaleString() 
+    : value;
   
   return (
-    <Card 
+    <Paper 
+      elevation={0} 
       sx={{ 
-        p: 3, 
-        borderRadius: 2, 
-        height: '100%',
+        borderRadius: '16px', 
+        overflow: 'hidden', 
+        height: '100%', 
+        boxShadow: '0 2px 10px rgba(0,0,0,0.08)',
         transition: 'transform 0.3s, box-shadow 0.3s',
         '&:hover': {
           transform: 'translateY(-5px)',
-          boxShadow: 6,
+          boxShadow: '0 8px 20px rgba(0,0,0,0.12)',
         }
       }}
     >
-      <Box display="flex" alignItems="center" sx={{ mb: 2 }}>
-        <Box 
-          sx={{ 
-            bgcolor: `${cardColor}.light`,
-            color: `${cardColor}.main`,
-            borderRadius: '50%',
-            width: 56,
-            height: 56,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            mr: 2
-          }}
-        >
-          {icon}
-        </Box>
-        <Box>
-          <Typography variant="h6" component="div" sx={{ fontWeight: 'bold' }}>
-            {value}
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {title}
-          </Typography>
-        </Box>
-      </Box>
-      {change && (
-        <Box display="flex" alignItems="center">
-          <ChangeIcon sx={{ fontSize: 16, color: getChangeColor(), mr: 0.5 }} />
-          <Typography 
-            variant="body2" 
+      <Box sx={{ p: 3 }}>
+        <Box display="flex" justifyContent="space-between" alignItems="flex-start">
+          <Box>
+            <Typography variant="h6" color="text.secondary" fontWeight="normal" sx={{ mb: 3 }}>
+              {title}
+            </Typography>
+            <Typography variant="h4" component="div" fontWeight="bold">
+              {formattedValue}
+            </Typography>
+            {detail && (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                {detail}
+              </Typography>
+            )}
+          </Box>
+          <Avatar 
             sx={{ 
-              color: getChangeColor(),
-              fontWeight: 'medium'
+              bgcolor: `${cardColor}.light`, 
+              p: 1
             }}
           >
-            {Math.abs(change)}%
-          </Typography>
+            {React.cloneElement(icon, { color: cardColor })}
+          </Avatar>
         </Box>
-      )}
-    </Card>
+        
+        {change && (
+          <Box sx={{ display: 'flex', alignItems: 'center', mt: 2 }}>
+            <ChangeIcon sx={{ color: getChangeColor(), mr: 1, fontSize: 20 }} />
+            <Typography variant="body2" sx={{ color: getChangeColor(), fontWeight: 'medium' }}>
+              {Math.abs(change)}% {changeType === 'positive' ? 'increase' : 'decrease'}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ ml: 1 }}>
+              from last period
+            </Typography>
+          </Box>
+        )}
+        
+        {progress && (
+          <Box sx={{ mt: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+              <Typography variant="body2" color="text.secondary">
+                {progress.label}
+              </Typography>
+              <Typography variant="body2" fontWeight="medium" color={progress.color || cardColor}>
+                {progress.value}%
+              </Typography>
+            </Box>
+            <LinearProgress 
+              variant="determinate" 
+              value={parseFloat(progress.value)} 
+              sx={{ 
+                height: 6, 
+                borderRadius: 3,
+                bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)'
+              }} 
+              color={progress.color || cardColor} 
+            />
+          </Box>
+        )}
+      </Box>
+    </Paper>
   );
 };
 
