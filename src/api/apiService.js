@@ -160,6 +160,171 @@ const apiService = {
     }
   },
 
+  // Get all customers
+  getCustomers: async (params = {}) => {
+    const { page = 0, limit = 100, sortBy = 'id', sortOrder = 'asc', filters = {} } = params;
+    try {
+      const response = await axios.get(`${API_URL}/customers`, {
+        params: {
+          page,
+          limit,
+          sortBy,
+          sortOrder,
+          ...filters
+        }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch customers:', error);
+      // Return empty data instead of throwing
+      return { customers: [], total: 0 };
+    }
+  },
+
+  // Get customer by ID
+  getCustomerById: async (customerId) => {
+    try {
+      const response = await axios.get(`${API_URL}/customers/${customerId}`);
+      return response.data;
+    } catch (error) {
+      console.error(`Failed to fetch customer ${customerId}:`, error);
+      throw error;
+    }
+  },
+
+  // Get customer transactions
+  getCustomerTransactions: async (customerId, params = {}) => {
+    const { page = 0, limit = 10, sortBy = 'timestamp', sortOrder = 'desc' } = params;
+    try {
+      const response = await axios.get(`${API_URL}/customers/${customerId}/transactions`, {
+        params: {
+          page,
+          limit,
+          sortBy,
+          sortOrder
+        }
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`Failed to fetch transactions for customer ${customerId}:`, error);
+      throw error;
+    }
+  },
+
+  // Update customer risk score
+  updateCustomerRiskScore: async (customerId, riskScore) => {
+    try {
+      const response = await axios.post(`${API_URL}/customers/${customerId}/risk-score`, { risk_score: riskScore });
+      return response.data;
+    } catch (error) {
+      console.error(`Failed to update risk score for customer ${customerId}:`, error);
+      throw error;
+    }
+  },
+
+  // Get all merchants
+  getMerchants: async (params = {}) => {
+    const { page = 0, limit = 100, sortBy = 'id', sortOrder = 'asc', filters = {} } = params;
+    try {
+      const response = await axios.get(`${API_URL}/merchants`, {
+        params: {
+          page,
+          limit,
+          sortBy,
+          sortOrder,
+          ...filters
+        }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch merchants:', error);
+      // Return empty data instead of throwing
+      return { merchants: [], total: 0 };
+    }
+  },
+
+  // Get merchant by ID
+  getMerchantById: async (merchantId) => {
+    try {
+      const response = await axios.get(`${API_URL}/merchants/${merchantId}`);
+      return response.data;
+    } catch (error) {
+      console.error(`Failed to fetch merchant ${merchantId}:`, error);
+      throw error;
+    }
+  },
+
+  // Get merchant transactions
+  getMerchantTransactions: async (merchantId, params = {}) => {
+    const { page = 0, limit = 10, sortBy = 'timestamp', sortOrder = 'desc' } = params;
+    try {
+      const response = await axios.get(`${API_URL}/merchants/${merchantId}/transactions`, {
+        params: {
+          page,
+          limit,
+          sortBy,
+          sortOrder
+        }
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`Failed to fetch transactions for merchant ${merchantId}:`, error);
+      throw error;
+    }
+  },
+
+  // Update merchant risk score
+  updateMerchantRiskScore: async (merchantId, riskScore) => {
+    try {
+      const response = await axios.post(`${API_URL}/merchants/${merchantId}/risk-score`, { risk_score: riskScore });
+      return response.data;
+    } catch (error) {
+      console.error(`Failed to update risk score for merchant ${merchantId}:`, error);
+      throw error;
+    }
+  },
+
+  // Get risk analytics
+  getRiskAnalytics: async (params = {}) => {
+    const { timeRange = '30d' } = params;
+    try {
+      // Add timestamp to avoid caching
+      const timestamp = new Date().getTime();
+      const response = await axios.get(`${API_URL}/risk-analysis`, {
+        params: {
+          timeRange,
+          _t: timestamp // Cache busting parameter
+        }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch risk analytics:', error);
+      throw error;
+    }
+  },
+
+  // Get high risk entities
+  getHighRiskEntities: async () => {
+    try {
+      const response = await axios.get(`${API_URL}/risk-analysis/high-risk-entities`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch high risk entities:', error);
+      throw error;
+    }
+  },
+
+  // Get risk factors
+  getRiskFactors: async () => {
+    try {
+      const response = await axios.get(`${API_URL}/risk-analysis/risk-factors`);
+      return response.data;
+    } catch (error) {
+      console.error('Failed to fetch risk factors:', error);
+      throw error;
+    }
+  },
+
   // WebSocket connection for real-time updates
   createWebSocketConnection: () => {
     return new WebSocket(`ws://${API_URL.replace('http://', '')}/ws`);

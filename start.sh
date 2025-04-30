@@ -7,10 +7,11 @@ BACKEND_PID=$!
 
 # Start Frontend
 cd ..
+export PORT=3001
 npm start &
 FRONTEND_PID=$!
 
-echo "Both services started! Access the dashboard at http://localhost:3000"
+echo "Both services started! Access the dashboard at http://localhost:3001"
 echo "Press Ctrl+C to stop both services"
 
 # Handle shutdown

@@ -6,6 +6,9 @@ import MainLayout from './components/Layout/MainLayout';
 import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
 import Anomalies from './pages/Anomalies';
+import Customers from './pages/Customers';
+import Merchants from './pages/Merchants';
+import RiskAnalysis from './pages/RiskAnalysis';
 
 // These pages would be implemented in a full application
 const PlaceholderPage = ({ title }) => (
@@ -25,9 +28,9 @@ const App = () => {
               <Route path="/" element={<Dashboard />} />
               <Route path="/transactions" element={<Transactions />} />
               <Route path="/anomalies" element={<Anomalies />} />
-              <Route path="/customers" element={<PlaceholderPage title="Customers" />} />
-              <Route path="/merchants" element={<PlaceholderPage title="Merchants" />} />
-              <Route path="/risk-analysis" element={<PlaceholderPage title="Risk Analysis" />} />
+              <Route path="/customers" element={<Customers />} />
+              <Route path="/merchants" element={<Merchants />} />
+              <Route path="/risk-analysis" element={<RiskAnalysis />} />
               <Route path="/settings" element={<PlaceholderPage title="Settings" />} />
               <Route path="/security" element={<PlaceholderPage title="Security" />} />
               <Route path="*" element={<Navigate to="/" replace />} />

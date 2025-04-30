@@ -186,17 +186,36 @@ class GraphDatabase:
             result = self.graph.run(query, merchant_id=merchant_id)
             data = result.data()[0]
             
-            # Simple risk score calculation
-            risk_score = (
-                (data['std_amount'] / data['avg_amount'] if data['avg_amount'] > 0 else 0) * 0.4 +
-                (1 / data['unique_customers'] if data['unique_customers'] > 0 else 1) * 0.3 +
-                (data['transaction_count'] / 1000 if data['transaction_count'] > 0 else 0) * 0.3
-            )
+            # Handle None values and provide defaults
+            transaction_count = data.get('transaction_count', 0) or 0
+            avg_amount = data.get('avg_amount', 0) or 0
+            std_amount = data.get('std_amount', 0) or 0
+            unique_customers = data.get('unique_customers', 0) or 0
+            
+            # Simple risk score calculation with safety checks
+            risk_score = 0.0
+            
+            # Component 1: Standard deviation / average amount (variance)
+            if avg_amount > 0:
+                risk_score += (std_amount / avg_amount) * 0.4
+            else:
+                risk_score += 0 # No risk if no transactions or zero average
+            
+            # Component 2: Few unique customers is riskier
+            if unique_customers > 0:
+                risk_score += (1 / unique_customers) * 0.3
+            else:
+                risk_score += 0.3 # Maximum risk if no customers
+            
+            # Component 3: Transaction volume
+            if transaction_count > 0:
+                risk_score += (transaction_count / 1000) * 0.3
             
             return min(max(risk_score, 0), 1)  # Normalize between 0 and 1
         except Exception as e:
             logger.error(f"Error calculating merchant risk score: {str(e)}")
-            raise
+            # Return a default risk score rather than raising an exception
+            return 0.5
 
 def get_or_create_customer(graph, customer_data):
     matcher = NodeMatcher(graph)
