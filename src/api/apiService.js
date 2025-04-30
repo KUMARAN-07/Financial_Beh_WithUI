@@ -328,6 +328,20 @@ const apiService = {
   // WebSocket connection for real-time updates
   createWebSocketConnection: () => {
     return new WebSocket(`ws://${API_URL.replace('http://', '')}/ws`);
+  },
+
+  // Chatbot - Ollama Llama 3 integration
+  getChatbotResponse: async (message) => {
+    try {
+      const response = await axios.post(`${API_URL}/chatbot/query`, {
+        message,
+        model: "llama3"
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Failed to get chatbot response:', error);
+      throw error;
+    }
   }
 };
 

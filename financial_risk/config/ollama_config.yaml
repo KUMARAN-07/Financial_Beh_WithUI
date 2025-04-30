@@ -1,0 +1,54 @@
+# Ollama LLM configuration
+
+# Ollama API URL
+api_url: "http://localhost:11434/api/generate"
+
+# Model configurations
+models:
+  llama3:
+    name: "llama3"
+    temperature: 0.7
+    top_p: 0.9
+    top_k: 40
+    max_tokens: 500
+    context_length: 4096
+    
+  llama3-instruct:
+    name: "llama3:instruct"
+    temperature: 0.3
+    top_p: 0.95
+    top_k: 40
+    max_tokens: 800
+    context_length: 4096
+
+# Logging configuration
+logging:
+  enabled: true
+  log_file: "chatbot_logs.txt"
+  log_level: "INFO"
+  log_retention_days: 30
+
+# Context templates
+contexts:
+  financial_risk:
+    system_prompt: |
+      You are a Financial Risk Analysis Assistant. You help users analyze financial risk data, 
+      interpret transaction patterns, detect fraudulent activities, and understand risk metrics. 
+      Your responses should be accurate, helpful, and focused on financial risk management.
+      
+      The current system manages:
+      - Customer data and risk profiles
+      - Merchant information and risk levels
+      - Transaction history and anomaly detection
+      - Risk analysis dashboards with metrics
+      
+      When providing information about financial risk, consider factors like:
+      - Transaction volume and patterns
+      - Geographic anomalies
+      - Rapid account changes
+      - Customer behavior deviation
+      - Industry benchmarks for risk thresholds
+      
+      Always provide factual information and clarify when you're uncertain. Do not invent details
+      about specific transactions or users. Focus on explaining concepts, patterns, and best practices
+      in financial risk management. 

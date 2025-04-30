@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from financial_risk.utils.data_generator import generate_test_data
 from financial_risk.graph.models import get_or_create_customer, get_or_create_account, get_or_create_merchant
@@ -16,11 +16,13 @@ import numpy as np
 from statistics import mean, stdev
 from collections import Counter
 import math
+import httpx
 
 from ..models.base import Transaction, Customer, Account, Merchant
 from ..models.anomaly.isolation_forest import AnomalyDetector
 from ..models.clustering.kmeans import BehavioralClusterer
 from ..graph.models import GraphDatabase
+from .chatbot_service import ChatbotService
 
 # Configure logging
 logging.basicConfig(
@@ -33,6 +35,11 @@ logger = logging.getLogger(__name__)
 config_path = Path(__file__).parent.parent / "config" / "config.yaml"
 with open(config_path) as f:
     config = yaml.safe_load(f)
+
+# Load Ollama configuration
+ollama_config_path = Path(__file__).parent.parent / "config" / "ollama_config.yaml"
+with open(ollama_config_path) as f:
+    ollama_config = yaml.safe_load(f)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -57,6 +64,9 @@ graph_db = GraphDatabase(
     database=config['neo4j']['database']
 )
 
+# Initialize chatbot service with graph_db
+chatbot_service = ChatbotService(graph_db)
+
 anomaly_detector = AnomalyDetector(
     contamination=config['models']['anomaly']['isolation_forest']['contamination'],
     random_state=config['models']['anomaly']['isolation_forest']['random_state'],
@@ -68,6 +78,16 @@ behavioral_clusterer = BehavioralClusterer(
     random_state=config['models']['kmeans']['random_state'],
     max_iter=config['models']['kmeans']['max_iter']
 )
+
+# Ollama LLM configuration
+OLLAMA_URL = ollama_config.get("api_url", "http://localhost:11434/api/generate")
+
+# Add pydantic model for chatbot request
+from pydantic import BaseModel
+
+class ChatbotRequest(BaseModel):
+    message: str
+    model: str = "llama3"  # Default to llama3 but allow other models
 
 @app.post("/dev/generate_and_train")
 async def generate_and_train(
@@ -225,7 +245,7 @@ async def get_customer_behavior(customer_id: str):
     """Get behavioral patterns and cluster for a customer."""
     try:
         # Get customer transactions
-        transactions = graph_db.get_customer_transactions(customer_id)
+        transactions = graph_db.get_customer_transactions(customer_id, limit=100)
         
         # Convert timestamp strings to datetime objects
         for tx in transactions:
@@ -246,15 +266,170 @@ async def get_customer_behavior(customer_id: str):
         if hasattr(distance, 'item'):
             distance = distance.item()
         
+        # Calculate additional behavioral metrics
+        
+        # Transaction amounts
+        amounts = [float(tx.get('amount', 0)) for tx in transactions]
+        max_transaction_amount = max(amounts) if amounts else 0
+        
+        # Common merchants and locations
+        merchant_counts = Counter([tx.get('merchant_id', 'unknown') for tx in transactions])
+        common_merchants = [merchant for merchant, count in merchant_counts.most_common(3)]
+        
+        location_counts = Counter([tx.get('location', 'unknown') for tx in transactions])
+        common_locations = [location for location, count in location_counts.most_common(3)]
+        
+        # Transaction timing
+        if transactions:
+            sorted_tx = sorted(transactions, key=lambda x: x.get('timestamp', datetime.now()))
+            days_since_last_transaction = (datetime.now() - sorted_tx[-1].get('timestamp', datetime.now())).days
+            
+            # Calculate time of day distribution
+            hours = [tx.get('timestamp').hour if hasattr(tx.get('timestamp'), 'hour') else 
+                    (int(tx.get('timestamp', '').split('T')[1].split(':')[0]) 
+                    if isinstance(tx.get('timestamp', ''), str) else 0) 
+                    for tx in transactions]
+            
+            hour_counts = Counter(hours)
+            typical_hours = [h for h, _ in hour_counts.most_common(2)]
+            typical_transaction_time = "Morning" if any(6 <= h < 12 for h in typical_hours) else \
+                                     "Afternoon" if any(12 <= h < 18 for h in typical_hours) else \
+                                     "Evening" if any(18 <= h < 22 for h in typical_hours) else "Night"
+        else:
+            days_since_last_transaction = 0
+            typical_transaction_time = "Varies"
+        
+        # Calculate transaction frequency (per month)
+        if transactions and len(transactions) > 1:
+            sorted_tx = sorted(transactions, key=lambda x: x.get('timestamp', datetime.now()))
+            first_date = sorted_tx[0].get('timestamp', datetime.now())
+            last_date = sorted_tx[-1].get('timestamp', datetime.now())
+            date_range = (last_date - first_date).days / 30.0  # convert to months
+            if date_range > 0:
+                transaction_frequency = len(transactions) / date_range
+            else:
+                transaction_frequency = len(transactions)  # all on same day
+        else:
+            transaction_frequency = 0
+        
+        # Identify new merchants in past 30 days
+        thirty_days_ago = datetime.now() - timedelta(days=30)
+        recent_merchants = set()
+        all_merchants = set()
+        
+        for tx in transactions:
+            tx_merchant = tx.get('merchant_id', 'unknown')
+            all_merchants.add(tx_merchant)
+            
+            if tx.get('timestamp', datetime.now()) >= thirty_days_ago:
+                recent_merchants.add(tx_merchant)
+        
+        new_merchants_past_month = len(recent_merchants.difference(all_merchants - recent_merchants))
+        
+        # Calculate risk indicators
+        risk_indicators = []
+        
+        # Indicator 1: Unusual transaction amount
+        if transactions and patterns.get('avg_amount', 0) > 0 and patterns.get('std_amount', 0) > 0:
+            for i, tx in enumerate(transactions):
+                amount = float(tx.get('amount', 0))
+                avg = float(patterns.get('avg_amount', 0))
+                std = float(patterns.get('std_amount', 0))
+                
+                if avg > 0 and std > 0 and amount > avg + 3*std:
+                    risk_indicators.append({
+                        "description": "Unusually large transaction amount",
+                        "details": f"Transaction {tx.get('id', i)} amount (${amount:.2f}) is significantly higher than average (${avg:.2f})",
+                        "severity": "high"
+                    })
+                    break  # Just include one example
+        
+        # Indicator 2: Geographical anomalies
+        if transactions:
+            location_tx_map = {}
+            for tx in transactions:
+                loc = tx.get('location', 'unknown')
+                if loc not in location_tx_map:
+                    location_tx_map[loc] = []
+                location_tx_map[loc].append(tx)
+            
+            # Look for rapid location changes
+            if len(transactions) > 2:
+                sorted_tx = sorted(transactions, key=lambda x: x.get('timestamp', datetime.now()))
+                for i in range(len(sorted_tx) - 1):
+                    tx1 = sorted_tx[i]
+                    tx2 = sorted_tx[i+1]
+                    loc1 = tx1.get('location', 'unknown')
+                    loc2 = tx2.get('location', 'unknown')
+                    time_diff = (tx2.get('timestamp', datetime.now()) - tx1.get('timestamp', datetime.now())).total_seconds() / 3600  # in hours
+                    
+                    if loc1 != loc2 and time_diff < 2 and loc1 != 'unknown' and loc2 != 'unknown':
+                        risk_indicators.append({
+                            "description": "Rapid location change",
+                            "details": f"Transactions in {loc1} and {loc2} within {time_diff:.1f} hours of each other",
+                            "severity": "medium"
+                        })
+                        break  # Just include one example
+        
+        # Indicator 3: Unusual transaction timing
+        night_tx_count = sum(1 for tx in transactions if 
+                            (tx.get('timestamp').hour if hasattr(tx.get('timestamp'), 'hour') else 0) in range(1, 5))
+        night_tx_ratio = night_tx_count / len(transactions) if transactions else 0
+        
+        if night_tx_ratio > 0.5 and night_tx_count > 3:
+            risk_indicators.append({
+                "description": "Unusual transaction timing",
+                "details": f"{night_tx_count} transactions ({night_tx_ratio:.1%}) occurred between 1am and 5am",
+                "severity": "medium"
+            })
+        
+        # Collect any behavior anomalies
+        behavior_anomalies = []
+        anomalous_txs = [tx for tx in transactions if tx.get('is_anomaly', False)]
+        
+        for i, tx in enumerate(anomalous_txs[:3]):  # Limit to top 3 anomalies
+            behavior_anomalies.append({
+                "description": f"Anomalous transaction detected ({tx.get('category', 'purchase')})",
+                "details": f"Transaction {tx.get('id', '')} of ${float(tx.get('amount', 0)):.2f} flagged as anomalous",
+                "timestamp": tx.get('timestamp', datetime.now()).isoformat() if hasattr(tx.get('timestamp', datetime.now()), 'isoformat') else str(tx.get('timestamp', ''))
+            })
+        
+        # Return enhanced response
         return {
             "customer_id": customer_id,
             "behavioral_patterns": patterns,
             "cluster": cluster,
-            "cluster_distance": distance
+            "cluster_distance": distance,
+            "transaction_count": len(transactions),
+            "avg_transaction_amount": float(patterns.get('avg_amount', 0)),
+            "max_transaction_amount": max_transaction_amount,
+            "transaction_frequency": transaction_frequency,
+            "days_since_last_transaction": days_since_last_transaction,
+            "common_locations": common_locations,
+            "preferred_merchants": common_merchants,
+            "new_merchants_past_month": new_merchants_past_month,
+            "typical_transaction_time": typical_transaction_time,
+            "risk_indicators": risk_indicators,
+            "behavior_anomalies": behavior_anomalies
         }
     except Exception as e:
         logger.error(f"Error getting customer behavior: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return a friendly error response with partial data
+        return {
+            "customer_id": customer_id,
+            "error": str(e),
+            "transaction_count": 0,
+            "avg_transaction_amount": 0,
+            "max_transaction_amount": 0,
+            "transaction_frequency": 0,
+            "days_since_last_transaction": 0,
+            "common_locations": [],
+            "preferred_merchants": [],
+            "new_merchants_past_month": 0,
+            "typical_transaction_time": "Unknown",
+            "risk_indicators": [],
+            "behavior_anomalies": []
+        }
 
 @app.get("/merchants/{merchant_id}/risk")
 async def get_merchant_risk(merchant_id: str):
@@ -1415,15 +1590,19 @@ async def get_customers(
 @app.get("/customers/{customer_id}")
 async def get_customer_by_id(customer_id: str):
     """
-    Get a specific customer by ID from the Neo4j database.
+    Get a specific customer by ID from the Neo4j database with detailed information.
     """
     try:
-        # Query customer data
+        # Query customer data with more computed metrics
         query = """
         MATCH (c:Customer {id: $customer_id})
         OPTIONAL MATCH (c)-[:HAS_ACCOUNT]->(a:Account)-[:MADE_TRANSACTION]->(t:Transaction)
-        WITH c, count(t) as transaction_count, avg(t.anomaly_score) as risk_score
-        RETURN c, transaction_count, risk_score
+        WITH c, 
+             count(t) as transaction_count, 
+             avg(t.anomaly_score) as risk_score,
+             sum(t.amount) as total_spend,
+             max(t.timestamp) as last_activity
+        RETURN c, transaction_count, risk_score, total_spend, last_activity
         """
         
         result = graph_db.graph.run(query, customer_id=customer_id)
@@ -1438,6 +1617,27 @@ async def get_customer_by_id(customer_id: str):
         # Add calculated properties
         customer['transaction_count'] = record[0]['transaction_count']
         customer['risk_score'] = record[0]['risk_score'] if record[0]['risk_score'] is not None else 0.0
+        customer['total_spend'] = record[0]['total_spend'] if record[0]['total_spend'] is not None else 0.0
+        
+        # Format last activity date
+        last_activity = record[0]['last_activity']
+        if last_activity:
+            if hasattr(last_activity, 'isoformat'):
+                customer['last_activity'] = last_activity.isoformat()
+            elif hasattr(last_activity, 'to_native'):
+                customer['last_activity'] = last_activity.to_native().isoformat()
+            else:
+                customer['last_activity'] = str(last_activity)
+        
+        # Ensure registration_date is in ISO format
+        if 'registration_date' in customer and hasattr(customer['registration_date'], 'isoformat'):
+            customer['registration_date'] = customer['registration_date'].isoformat()
+        elif 'registration_date' in customer and hasattr(customer['registration_date'], 'to_native'):
+            customer['registration_date'] = customer['registration_date'].to_native().isoformat()
+        
+        # Ensure is_active is a boolean
+        if 'is_active' not in customer:
+            customer['is_active'] = True  # Default to active
         
         # Get recent transactions
         tx_query = """
@@ -1453,12 +1653,83 @@ async def get_customer_by_id(customer_id: str):
         # Add recent transactions to the response
         customer['recent_transactions'] = recent_transactions
         
+        # Get accounts associated with the customer
+        account_query = """
+        MATCH (c:Customer {id: $customer_id})-[:HAS_ACCOUNT]->(a:Account)
+        RETURN a
+        """
+        
+        account_result = graph_db.graph.run(account_query, customer_id=customer_id)
+        accounts = [dict(record["a"]) for record in account_result]
+        customer['accounts'] = accounts
+        
+        # Calculate additional metrics
+        
+        # Transaction status distribution
+        status_query = """
+        MATCH (c:Customer {id: $customer_id})-[:HAS_ACCOUNT]->(a:Account)-[:MADE_TRANSACTION]->(t:Transaction)
+        RETURN t.status as status, count(t) as count
+        """
+        
+        status_result = graph_db.graph.run(status_query, customer_id=customer_id)
+        status_counts = {record["status"] or "completed": record["count"] for record in status_result}
+        customer['transaction_status_counts'] = status_counts
+        
+        # Category distribution
+        category_query = """
+        MATCH (c:Customer {id: $customer_id})-[:HAS_ACCOUNT]->(a:Account)-[:MADE_TRANSACTION]->(t:Transaction)
+        RETURN t.category as category, count(t) as count
+        ORDER BY count DESC
+        LIMIT 5
+        """
+        
+        category_result = graph_db.graph.run(category_query, customer_id=customer_id)
+        category_counts = {record["category"] or "unknown": record["count"] for record in category_result}
+        customer['top_categories'] = category_counts
+        
+        # Merchant distribution
+        merchant_query = """
+        MATCH (c:Customer {id: $customer_id})-[:HAS_ACCOUNT]->(a:Account)-[:MADE_TRANSACTION]->(t:Transaction)-[:TO]->(m:Merchant)
+        RETURN m.id as merchant_id, m.name as merchant_name, count(t) as count
+        ORDER BY count DESC
+        LIMIT 5
+        """
+        
+        merchant_result = graph_db.graph.run(merchant_query, customer_id=customer_id)
+        top_merchants = [{"id": record["merchant_id"], "name": record["merchant_name"], "count": record["count"]} 
+                         for record in merchant_result]
+        customer['top_merchants'] = top_merchants
+        
+        # Anomaly statistics
+        anomaly_query = """
+        MATCH (c:Customer {id: $customer_id})-[:HAS_ACCOUNT]->(a:Account)-[:MADE_TRANSACTION]->(t:Transaction)
+        WHERE t.is_anomaly = true
+        RETURN count(t) as anomaly_count
+        """
+        
+        anomaly_result = graph_db.graph.run(anomaly_query, customer_id=customer_id)
+        anomaly_record = anomaly_result.data()
+        customer['anomaly_count'] = anomaly_record[0]['anomaly_count'] if anomaly_record else 0
+        
+        if customer['transaction_count'] > 0:
+            customer['anomaly_ratio'] = customer['anomaly_count'] / customer['transaction_count']
+        else:
+            customer['anomaly_ratio'] = 0
+        
         return customer
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error in get_customer_by_id: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return a partial response with error information
+        return {
+            "id": customer_id,
+            "error": str(e),
+            "transaction_count": 0,
+            "risk_score": 0.5,
+            "total_spend": 0,
+            "is_active": True
+        }
 
 @app.get("/customers/{customer_id}/transactions")
 async def get_customer_transactions(
@@ -1787,6 +2058,48 @@ async def update_merchant_risk_score(merchant_id: str, risk_data: dict):
     except Exception as e:
         logger.error(f"Error in update_merchant_risk_score: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Add the chatbot endpoint
+@app.post("/chatbot/query")
+async def query_chatbot(request: ChatbotRequest, background_tasks: BackgroundTasks):
+    """
+    Send a query to the Ollama Llama 3 model and get a response.
+    This endpoint uses the ChatbotService to provide context-aware responses with data from Neo4j.
+    """
+    try:
+        logger.info(f"Chatbot query received: {request.message[:100]}...")
+        
+        # Use the chatbot service to get a response with contextual data
+        response_text = await chatbot_service.query_llm(
+            user_query=request.message,
+            model=request.model,
+            include_data=True
+        )
+        
+        # Function to log full conversation asynchronously
+        async def log_full_conversation():
+            log_settings = ollama_config.get("logging", {})
+            log_enabled = log_settings.get("enabled", True)
+            log_file = log_settings.get("log_file", "chatbot_logs.txt")
+            
+            if log_enabled:
+                with open(log_file, "a") as f:
+                    f.write(f"\n--- {datetime.now().isoformat()} ---\n")
+                    f.write(f"Query: {request.message}\n")
+                    f.write(f"Response: {response_text}\n")
+                    f.write("----------\n")
+        
+        # Log the conversation in the background
+        background_tasks.add_task(log_full_conversation)
+        
+        return {
+            "message": response_text,
+            "model": request.model
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in chatbot query: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error processing chatbot query: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

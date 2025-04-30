@@ -9,6 +9,7 @@ import Anomalies from './pages/Anomalies';
 import Customers from './pages/Customers';
 import Merchants from './pages/Merchants';
 import RiskAnalysis from './pages/RiskAnalysis';
+import RiskChatbot from './components/RiskChatbot';
 
 // These pages would be implemented in a full application
 const PlaceholderPage = ({ title }) => (
@@ -35,6 +36,8 @@ const App = () => {
               <Route path="/security" element={<PlaceholderPage title="Security" />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
+            {/* Chatbot is available on all pages */}
+            <RiskChatbot />
           </MainLayout>
         </DataProvider>
       </ThemeProvider>

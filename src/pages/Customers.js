@@ -25,13 +25,31 @@ import {
   Paper,
   IconButton,
   Chip,
-  Tooltip
+  Tooltip,
+  Modal,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Tabs,
+  Tab,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon
 } from '@mui/material';
 import {
   Search as SearchIcon,
   FilterList as FilterIcon,
   Visibility as VisibilityIcon,
-  ShowChart as ShowChartIcon
+  ShowChart as ShowChartIcon,
+  Person as PersonIcon,
+  Assignment as AssignmentIcon,
+  Timeline as TimelineIcon,
+  Warning as WarningIcon,
+  CheckCircle as CheckCircleIcon,
+  Error as ErrorIcon,
+  Close as CloseIcon
 } from '@mui/icons-material';
 import { useData } from '../context/DataContext';
 import apiService from '../api/apiService';
@@ -48,6 +66,10 @@ const Customers = () => {
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [customerDetails, setCustomerDetails] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
+  const [tabValue, setTabValue] = useState(0);
+  const [behaviorData, setBehaviorData] = useState(null);
+  const [showBehavior, setShowBehavior] = useState(false);
+  const [customerTransactions, setCustomerTransactions] = useState([]);
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: '',
@@ -92,11 +114,8 @@ const Customers = () => {
   const handleViewDetails = async (customerId) => {
     try {
       setIsLoading(true);
-      const behavior = await getCustomerBehavior(customerId);
-      setCustomerDetails({
-        ...behavior,
-        id: customerId
-      });
+      const customerData = await apiService.getCustomerById(customerId);
+      setCustomerDetails(customerData);
       setShowDetails(true);
       setIsLoading(false);
     } catch (error) {
@@ -107,6 +126,44 @@ const Customers = () => {
         severity: 'error'
       });
     }
+  };
+
+  const handleViewBehavior = async (customerId) => {
+    try {
+      setIsLoading(true);
+      const behavior = await getCustomerBehavior(customerId);
+      const transactions = await apiService.getCustomerTransactions(customerId, {
+        limit: 20,
+        sortOrder: 'desc'
+      });
+      
+      setBehaviorData(behavior);
+      setCustomerTransactions(transactions.transactions || []);
+      setShowBehavior(true);
+      setIsLoading(false);
+    } catch (error) {
+      setIsLoading(false);
+      setSnackbar({
+        open: true,
+        message: `Failed to load behavior for customer ${customerId}: ${error.message}`,
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleTabChange = (event, newValue) => {
+    setTabValue(newValue);
+  };
+
+  const handleCloseBehavior = () => {
+    setShowBehavior(false);
+    setBehaviorData(null);
+    setCustomerTransactions([]);
+  };
+
+  const handleCloseDetails = () => {
+    setShowDetails(false);
+    setCustomerDetails(null);
   };
 
   const handleApplyFilters = () => {
@@ -340,7 +397,11 @@ const Customers = () => {
                             </IconButton>
                           </Tooltip>
                           <Tooltip title="View Behavior">
-                            <IconButton size="small" color="secondary">
+                            <IconButton 
+                              size="small" 
+                              color="secondary"
+                              onClick={() => handleViewBehavior(customer.id)}
+                            >
                               <ShowChartIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
@@ -376,7 +437,465 @@ const Customers = () => {
         </CardContent>
       </Card>
       
-      {/* Customer Details Modal could be added here */}
+      {/* Customer Details Modal */}
+      <Dialog
+        open={showDetails}
+        onClose={handleCloseDetails}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Typography variant="h6">
+              Customer Details
+            </Typography>
+            <IconButton edge="end" color="inherit" onClick={handleCloseDetails} aria-label="close">
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent dividers>
+          {customerDetails ? (
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Box display="flex" alignItems="center" mb={2}>
+                      <PersonIcon color="primary" sx={{ mr: 1 }} />
+                      <Typography variant="h6" component="div">Basic Information</Typography>
+                    </Box>
+                    <Divider sx={{ mb: 2 }} />
+                    <List>
+                      <ListItem>
+                        <ListItemText 
+                          primary="Customer ID" 
+                          secondary={customerDetails.id || 'N/A'} 
+                          primaryTypographyProps={{ variant: 'subtitle2' }}
+                        />
+                      </ListItem>
+                      <ListItem>
+                        <ListItemText 
+                          primary="Name" 
+                          secondary={customerDetails.name || 'N/A'} 
+                          primaryTypographyProps={{ variant: 'subtitle2' }}
+                        />
+                      </ListItem>
+                      <ListItem>
+                        <ListItemText 
+                          primary="Email" 
+                          secondary={customerDetails.email || 'N/A'} 
+                          primaryTypographyProps={{ variant: 'subtitle2' }}
+                        />
+                      </ListItem>
+                      <ListItem>
+                        <ListItemText 
+                          primary="Registration Date" 
+                          secondary={customerDetails.registration_date ? 
+                            new Date(customerDetails.registration_date).toLocaleDateString() : 
+                            'N/A'} 
+                          primaryTypographyProps={{ variant: 'subtitle2' }}
+                        />
+                      </ListItem>
+                      <ListItem>
+                        <ListItemText 
+                          primary="Status" 
+                          secondary={
+                            <Chip 
+                              label={customerDetails.is_active ? "Active" : "Inactive"} 
+                              color={customerDetails.is_active ? "success" : "error"} 
+                              size="small"
+                            />
+                          } 
+                          primaryTypographyProps={{ variant: 'subtitle2' }}
+                        />
+                      </ListItem>
+                    </List>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Card>
+                  <CardContent>
+                    <Box display="flex" alignItems="center" mb={2}>
+                      <WarningIcon color="warning" sx={{ mr: 1 }} />
+                      <Typography variant="h6" component="div">Risk Information</Typography>
+                    </Box>
+                    <Divider sx={{ mb: 2 }} />
+                    <List>
+                      <ListItem>
+                        <ListItemText 
+                          primary="Risk Score" 
+                          secondary={
+                            <Box display="flex" alignItems="center">
+                              <Box
+                                sx={{
+                                  width: '70%',
+                                  bgcolor: 'grey.300',
+                                  mr: 1,
+                                  borderRadius: 5,
+                                }}
+                              >
+                                <Box
+                                  sx={{
+                                    width: `${(customerDetails.risk_score || 0) * 100}%`,
+                                    height: 10,
+                                    bgcolor: 
+                                      (customerDetails.risk_score || 0) > 0.7 ? 'error.main' : 
+                                      (customerDetails.risk_score || 0) > 0.3 ? 'warning.main' : 'success.main',
+                                    borderRadius: 5,
+                                  }}
+                                />
+                              </Box>
+                              <Typography variant="body2">
+                                {customerDetails.risk_score ? 
+                                  (customerDetails.risk_score * 100).toFixed(1) + '%' : 'N/A'}
+                              </Typography>
+                            </Box>
+                          } 
+                          primaryTypographyProps={{ variant: 'subtitle2' }}
+                        />
+                      </ListItem>
+                      <ListItem>
+                        <ListItemText 
+                          primary="Risk Level" 
+                          secondary={getRiskChip(customerDetails.risk_score)} 
+                          primaryTypographyProps={{ variant: 'subtitle2' }}
+                        />
+                      </ListItem>
+                      <ListItem>
+                        <ListItemText 
+                          primary="Last Activity" 
+                          secondary={customerDetails.last_activity ? 
+                            new Date(customerDetails.last_activity).toLocaleString() : 'N/A'} 
+                          primaryTypographyProps={{ variant: 'subtitle2' }}
+                        />
+                      </ListItem>
+                      <ListItem>
+                        <ListItemText 
+                          primary="Total Transactions" 
+                          secondary={customerDetails.transaction_count || 'N/A'} 
+                          primaryTypographyProps={{ variant: 'subtitle2' }}
+                        />
+                      </ListItem>
+                      <ListItem>
+                        <ListItemText 
+                          primary="Total Spend" 
+                          secondary={customerDetails.total_spend ? 
+                            `$${customerDetails.total_spend.toFixed(2)}` : 'N/A'} 
+                          primaryTypographyProps={{ variant: 'subtitle2' }}
+                        />
+                      </ListItem>
+                    </List>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12}>
+                <Box display="flex" justifyContent="flex-end" mt={2}>
+                  <Button 
+                    variant="contained" 
+                    color="secondary"
+                    onClick={() => {
+                      handleViewBehavior(customerDetails.id);
+                      handleCloseDetails();
+                    }}
+                    startIcon={<ShowChartIcon />}
+                  >
+                    View Behavior
+                  </Button>
+                </Box>
+              </Grid>
+            </Grid>
+          ) : (
+            <Box display="flex" justifyContent="center" p={3}>
+              <CircularProgress />
+            </Box>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Customer Behavior Modal */}
+      <Dialog
+        open={showBehavior}
+        onClose={handleCloseBehavior}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Typography variant="h6">
+              Customer Behavior Analysis
+              {behaviorData && behaviorData.customer_id && 
+                ` - ${behaviorData.customer_id}`}
+            </Typography>
+            <IconButton edge="end" color="inherit" onClick={handleCloseBehavior} aria-label="close">
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent dividers>
+          {behaviorData ? (
+            <Box>
+              <Tabs value={tabValue} onChange={handleTabChange} sx={{ mb: 3 }}>
+                <Tab label="Behavior Summary" icon={<TimelineIcon />} iconPosition="start" />
+                <Tab label="Recent Transactions" icon={<AssignmentIcon />} iconPosition="start" />
+                <Tab label="Risk Indicators" icon={<WarningIcon />} iconPosition="start" />
+              </Tabs>
+              
+              {tabValue === 0 && (
+                <Grid container spacing={3}>
+                  <Grid item xs={12} md={6}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="h6" gutterBottom>
+                          Transaction Patterns
+                        </Typography>
+                        <List>
+                          <ListItem>
+                            <ListItemIcon>
+                              <ShowChartIcon color="primary" />
+                            </ListItemIcon>
+                            <ListItemText 
+                              primary="Average Transaction Amount" 
+                              secondary={behaviorData.avg_transaction_amount ? 
+                                `$${behaviorData.avg_transaction_amount.toFixed(2)}` : 'N/A'} 
+                            />
+                          </ListItem>
+                          <ListItem>
+                            <ListItemIcon>
+                              <ShowChartIcon color="primary" />
+                            </ListItemIcon>
+                            <ListItemText 
+                              primary="Maximum Transaction" 
+                              secondary={behaviorData.max_transaction_amount ? 
+                                `$${behaviorData.max_transaction_amount.toFixed(2)}` : 'N/A'} 
+                            />
+                          </ListItem>
+                          <ListItem>
+                            <ListItemIcon>
+                              <TimelineIcon color="primary" />
+                            </ListItemIcon>
+                            <ListItemText 
+                              primary="Transaction Frequency" 
+                              secondary={`${behaviorData.transaction_frequency || 'Unknown'} per month`} 
+                            />
+                          </ListItem>
+                          <ListItem>
+                            <ListItemIcon>
+                              <TimelineIcon color="primary" />
+                            </ListItemIcon>
+                            <ListItemText 
+                              primary="Days Since Last Transaction" 
+                              secondary={behaviorData.days_since_last_transaction || 'N/A'} 
+                            />
+                          </ListItem>
+                        </List>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="h6" gutterBottom>
+                          Location & Merchant Behavior
+                        </Typography>
+                        <List>
+                          <ListItem>
+                            <ListItemIcon>
+                              <PersonIcon color="primary" />
+                            </ListItemIcon>
+                            <ListItemText 
+                              primary="Common Locations" 
+                              secondary={behaviorData.common_locations ? 
+                                behaviorData.common_locations.join(', ') : 'N/A'} 
+                            />
+                          </ListItem>
+                          <ListItem>
+                            <ListItemIcon>
+                              <PersonIcon color="primary" />
+                            </ListItemIcon>
+                            <ListItemText 
+                              primary="Preferred Merchants" 
+                              secondary={behaviorData.preferred_merchants ? 
+                                behaviorData.preferred_merchants.join(', ') : 'N/A'} 
+                            />
+                          </ListItem>
+                          <ListItem>
+                            <ListItemIcon>
+                              <TimelineIcon color="primary" />
+                            </ListItemIcon>
+                            <ListItemText 
+                              primary="New Merchants Past 30 Days" 
+                              secondary={behaviorData.new_merchants_past_month || '0'} 
+                            />
+                          </ListItem>
+                          <ListItem>
+                            <ListItemIcon>
+                              <TimelineIcon color="primary" />
+                            </ListItemIcon>
+                            <ListItemText 
+                              primary="Typical Transaction Time" 
+                              secondary={behaviorData.typical_transaction_time || 'Varies'} 
+                            />
+                          </ListItem>
+                        </List>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                </Grid>
+              )}
+              
+              {tabValue === 1 && (
+                <TableContainer component={Paper}>
+                  <Table>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Transaction ID</TableCell>
+                        <TableCell>Date & Time</TableCell>
+                        <TableCell>Amount</TableCell>
+                        <TableCell>Merchant</TableCell>
+                        <TableCell>Status</TableCell>
+                        <TableCell>Risk</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {customerTransactions.length > 0 ? (
+                        customerTransactions.map((transaction) => (
+                          <TableRow key={transaction.id}>
+                            <TableCell>{transaction.id}</TableCell>
+                            <TableCell>
+                              {transaction.timestamp ? 
+                                new Date(transaction.timestamp).toLocaleString() : 'N/A'}
+                            </TableCell>
+                            <TableCell>${transaction.amount.toFixed(2)}</TableCell>
+                            <TableCell>{transaction.merchant_id || 'N/A'}</TableCell>
+                            <TableCell>
+                              <Chip 
+                                label={transaction.status || 'Completed'} 
+                                color={
+                                  transaction.status === 'failed' ? 'error' : 
+                                  transaction.status === 'pending' ? 'warning' : 'success'
+                                } 
+                                size="small"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              {transaction.is_anomaly ? (
+                                <Chip icon={<WarningIcon />} label="Anomaly" color="error" size="small" />
+                              ) : (
+                                <Chip icon={<CheckCircleIcon />} label="Normal" color="success" size="small" />
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={6} align="center">
+                            <Typography variant="body2" color="textSecondary">
+                              No transactions found
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+              
+              {tabValue === 2 && (
+                <Grid container spacing={3}>
+                  <Grid item xs={12}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="h6" gutterBottom color="error">
+                          Risk Indicators
+                        </Typography>
+                        <List>
+                          {behaviorData.risk_indicators && behaviorData.risk_indicators.length > 0 ? (
+                            behaviorData.risk_indicators.map((indicator, index) => (
+                              <ListItem key={index}>
+                                <ListItemIcon>
+                                  {indicator.severity === 'high' ? (
+                                    <ErrorIcon color="error" />
+                                  ) : indicator.severity === 'medium' ? (
+                                    <WarningIcon color="warning" />
+                                  ) : (
+                                    <CheckCircleIcon color="success" />
+                                  )}
+                                </ListItemIcon>
+                                <ListItemText 
+                                  primary={indicator.description}
+                                  secondary={indicator.details}
+                                  primaryTypographyProps={{ 
+                                    color: indicator.severity === 'high' ? 'error' : 
+                                      indicator.severity === 'medium' ? 'warning.main' : 'textPrimary'
+                                  }}
+                                />
+                              </ListItem>
+                            ))
+                          ) : (
+                            <ListItem>
+                              <ListItemIcon>
+                                <CheckCircleIcon color="success" />
+                              </ListItemIcon>
+                              <ListItemText 
+                                primary="No significant risk indicators detected" 
+                                secondary="Customer behavior appears normal"
+                              />
+                            </ListItem>
+                          )}
+                        </List>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Card>
+                      <CardContent>
+                        <Typography variant="h6" gutterBottom>
+                          Behavior Anomalies
+                        </Typography>
+                        <List>
+                          {behaviorData.behavior_anomalies && behaviorData.behavior_anomalies.length > 0 ? (
+                            behaviorData.behavior_anomalies.map((anomaly, index) => (
+                              <ListItem key={index}>
+                                <ListItemIcon>
+                                  <WarningIcon color="warning" />
+                                </ListItemIcon>
+                                <ListItemText 
+                                  primary={anomaly.description}
+                                  secondary={`Detected on: ${new Date(anomaly.timestamp).toLocaleDateString()}`}
+                                />
+                              </ListItem>
+                            ))
+                          ) : (
+                            <ListItem>
+                              <ListItemIcon>
+                                <CheckCircleIcon color="success" />
+                              </ListItemIcon>
+                              <ListItemText 
+                                primary="No behavior anomalies detected" 
+                                secondary="Transaction pattern is consistent with historical data"
+                              />
+                            </ListItem>
+                          )}
+                        </List>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                </Grid>
+              )}
+            </Box>
+          ) : (
+            <Box display="flex" justifyContent="center" p={3}>
+              <CircularProgress />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseBehavior} color="primary">
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
       
       <Snackbar
         open={snackbar.open}
